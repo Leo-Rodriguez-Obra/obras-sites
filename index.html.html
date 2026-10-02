@@ -1,0 +1,2123 @@
+<!DOCTYPE html>
+<html lang="es" class="h-full bg-slate-100">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title> OBRAS SITES - Kanban de Seguimiento </title>
+  
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              50: '#f0f7ff',
+              100: '#e0effe',
+              500: '#0284c7',
+              600: '#0369a1',
+              700: '#075985',
+              800: '#0c4a6e',
+              900: '#0f172a',
+            }
+          }
+        }
+      }
+    }
+  </script>
+
+  <!-- React & ReactDOM -->
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  <!-- Babel Standalone -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  
+  <!-- FontAwesome Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  
+  <!-- Inter Font -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+
+  <style>
+    body {
+      font-family: 'Inter', sans-serif;
+      user-select: none;
+    }
+    
+    .custom-scrollbar::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    .custom-scrollbar::-webkit-scrollbar-track {
+      background: rgba(0, 0, 0, 0.03);
+      border-radius: 8px;
+    }
+    .custom-scrollbar::-webkit-scrollbar-thumb {
+      background: rgba(148, 163, 184, 0.5);
+      border-radius: 8px;
+    }
+    .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+      background: rgba(100, 116, 139, 0.8);
+    }
+
+    .drag-over-column {
+      background-color: rgba(224, 242, 254, 0.6) !important;
+      border: 2px dashed #0284c7 !important;
+    }
+
+    .card-dragging {
+      opacity: 0.4;
+      transform: scale(0.98);
+    }
+  </style>
+</head>
+<body class="h-full text-slate-800 antialiased selection:bg-sky-500 selection:text-white">
+  <div id="root" class="h-full"></div>
+
+  <!-- Firebase Integration Script -->
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+    import { getAuth, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+    import { getFirestore, doc, setDoc, deleteDoc, onSnapshot, collection } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+    window.FirebaseCore = {
+      initializeApp, getAuth, signInAnonymously, signInWithCustomToken,
+      getFirestore, doc, setDoc, deleteDoc, onSnapshot, collection
+    };
+  </script>
+
+  <!-- React Application Logic -->
+  <script type="text/babel">
+    const { useState, useEffect, useRef, useMemo } = React;
+
+    const DEFAULT_BOARDS = [
+      { id: 'board-1', name: 'Despliegue Obras Sites', description: 'Seguimiento principal de infraestructura y torres' },
+      { id: 'board-2', name: 'Mantenimiento & Reformas', description: 'Adecuaciones y mantenimientos preventivos' }
+    ];
+
+    // Web Audio Synthesized "Pip" Notification Sound
+    const playPipSound = () => {
+      try {
+        const AudioContext = window.AudioContext || window.webkitAudioContext;
+        if (!AudioContext) return;
+        if (!window.audioCtx) {
+          window.audioCtx = new AudioContext();
+        }
+        if (window.audioCtx.state === 'suspended') {
+          window.audioCtx.resume();
+        }
+        const ctx = window.audioCtx;
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(880, ctx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(1320, ctx.currentTime + 0.08);
+        
+        gain.gain.setValueAtTime(0.2, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.08);
+        
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        
+        osc.start(ctx.currentTime);
+        osc.stop(ctx.currentTime + 0.08);
+      } catch (e) {
+        console.warn("Audio play error:", e);
+      }
+    };
+
+    const DEFAULT_COLUMNS = [
+      { id: 'pendientes', name: 'Pendientes', color: 'border-slate-400', bg: 'bg-slate-100', text: 'text-slate-700', badge: 'bg-slate-200 text-slate-800', icon: 'fa-solid fa-clock' },
+      { id: 'planificacion', name: 'En Planificación', color: 'border-amber-400', bg: 'bg-amber-50/50', text: 'text-amber-800', badge: 'bg-amber-100 text-amber-900', icon: 'fa-solid fa-compass' },
+      { id: 'ejecucion', name: 'En Ejecución', color: 'border-blue-500', bg: 'bg-blue-50/50', text: 'text-blue-800', badge: 'bg-blue-100 text-blue-900', icon: 'fa-solid fa-helmet-safety' },
+      { id: 'bloqueado', name: 'Bloqueado', color: 'border-red-500', bg: 'bg-red-50/50', text: 'text-red-800', badge: 'bg-red-100 text-red-900', icon: 'fa-solid fa-triangle-exclamation' },
+      { id: 'finalizado', name: 'Finalizado', color: 'border-emerald-500', bg: 'bg-emerald-50/50', text: 'text-emerald-800', badge: 'bg-emerald-100 text-emerald-900', icon: 'fa-solid fa-circle-check' }
+    ];
+
+    const ETAPAS_LIST = [
+      { id: 'relevamiento', label: 'RELEVAMIENTO', short: 'REL' },
+      { id: 'contrato', label: 'CONTRATO', short: 'CTR' },
+      { id: 'gestion_candidato', label: 'GESTION CANDIDATO', short: 'CND' },
+      { id: 'mc_cimentacion', label: 'MC CIMENTACION', short: 'CIM' },
+      { id: 'ingenieria', label: 'INGENIERIA', short: 'ING' },
+      { id: 'energia_pilar', label: 'ENERGIA - PILAR', short: 'ENG' },
+      { id: 'ee_conexion', label: 'EE CONEXIÓN', short: 'EEC' },
+      { id: 'logistica_previa', label: 'LOGISTICA PREVIA', short: 'LOG' },
+      { id: 'estructura_prov', label: 'ESTRUCT. PROV', short: 'EST' }
+    ];
+
+    const CONTRATISTAS_DEFAULT = [
+      'RAUL',
+      'Ingeniería & Obras S.A.',
+      'Constructora del Sur',
+      'ElectroMontajes B.A.',
+      'Telecom Infraestructuras',
+      'Techint Infraestructura',
+      'Servicios y Montajes S.R.L.'
+    ];
+
+    const ESTRUCTURAS_DEFAULT = [
+      'TAS 45 MER',
+      'Torre Autosoportada 30m',
+      'Monopolo 24m',
+      'Edificio Roof-Top',
+      'Poste Hormigón H30',
+      'Mástil Arriostrado 42m'
+    ];
+
+    const INITIAL_PROJECTS = [
+      {
+        id: 'proj-101',
+        boardId: 'board-1',
+        code: 'TU00305',
+        title: 'Alderetes M1',
+        columnId: 'ejecucion',
+        contratista: 'RAUL',
+        estructura: 'TAS 45 MER',
+        fechaInicio: '5/10/26',
+        fechaFin: '30/10/26',
+        prioridad: 'Alta',
+        ubicacion: 'Tucumán, Alderetes',
+        notas: 'Obra en ejecución. MC Cimentación completada. Inspección de pilar de energía agendada.',
+        etapas: {
+          relevamiento: 'green',
+          contrato: 'green',
+          gestion_candidato: 'green',
+          mc_cimentacion: 'green',
+          ingenieria: 'green',
+          energia_pilar: 'yellow',
+          ee_conexion: 'yellow',
+          logistica_previa: 'green',
+          estructura_prov: 'green'
+        }
+      },
+      {
+        id: 'proj-102',
+        boardId: 'board-1',
+        code: 'OBR2026-002',
+        title: 'Monopolo San Martín',
+        columnId: 'planificacion',
+        contratista: 'Constructora del Sur',
+        estructura: 'Monopolo 24m',
+        fechaInicio: '10/10/26',
+        fechaFin: '1/12/26',
+        prioridad: 'Media',
+        ubicacion: 'San Martín, GBA',
+        notas: 'Permiso municipal aprobado. Esperando firma de contrato.',
+        etapas: {
+          relevamiento: 'green',
+          contrato: 'yellow',
+          gestion_candidato: 'green',
+          mc_cimentacion: 'gray',
+          ingenieria: 'yellow',
+          energia_pilar: 'gray',
+          ee_conexion: 'gray',
+          logistica_previa: 'gray',
+          estructura_prov: 'gray'
+        }
+      },
+      {
+        id: 'proj-103',
+        boardId: 'board-1',
+        code: 'OBR2026-003',
+        title: 'Roof-Top Microcentro',
+        columnId: 'bloqueado',
+        contratista: 'ElectroMontajes B.A.',
+        estructura: 'Edificio Roof-Top',
+        fechaInicio: '15/8/26',
+        fechaFin: '30/10/26',
+        prioridad: 'Alta',
+        ubicacion: 'CABA Centro',
+        notas: 'BLOQUEO: Conflicto con el consorcio de propietarios.',
+        etapas: {
+          relevamiento: 'green',
+          contrato: 'green',
+          gestion_candidato: 'red',
+          mc_cimentacion: 'green',
+          ingenieria: 'green',
+          energia_pilar: 'yellow',
+          ee_conexion: 'gray',
+          logistica_previa: 'red',
+          estructura_prov: 'gray'
+        }
+      },
+      {
+        id: 'proj-104',
+        boardId: 'board-1',
+        code: 'TU00412',
+        title: 'Lomas de Zamora S1',
+        columnId: 'pendientes',
+        contratista: 'RAUL',
+        estructura: 'Torre Autosoportada 30m',
+        fechaInicio: '1/11/26',
+        fechaFin: '15/12/26',
+        prioridad: 'Media',
+        ubicacion: 'Lomas de Zamora, GBA',
+        notas: 'Pendiente de inicio de relevamiento de campo.',
+        etapas: {
+          relevamiento: 'yellow',
+          contrato: 'gray',
+          gestion_candidato: 'gray',
+          mc_cimentacion: 'gray',
+          ingenieria: 'gray',
+          energia_pilar: 'gray',
+          ee_conexion: 'gray',
+          logistica_previa: 'gray',
+          estructura_prov: 'gray'
+        }
+      },
+      {
+        id: 'proj-105',
+        boardId: 'board-1',
+        code: 'TU00415',
+        title: 'Quilmes Oeste Centro',
+        columnId: 'pendientes',
+        contratista: 'Telecom Infraestructuras',
+        estructura: 'Poste Hormigón H30',
+        fechaInicio: '10/11/26',
+        fechaFin: '20/12/26',
+        prioridad: 'Alta',
+        ubicacion: 'Quilmes, BAE',
+        notas: 'Validando factibilidad técnica de terreno.',
+        etapas: {
+          relevamiento: 'green',
+          contrato: 'gray',
+          gestion_candidato: 'gray',
+          mc_cimentacion: 'gray',
+          ingenieria: 'gray',
+          energia_pilar: 'gray',
+          ee_conexion: 'gray',
+          logistica_previa: 'gray',
+          estructura_prov: 'gray'
+        }
+      },
+      {
+        id: 'proj-106',
+        boardId: 'board-1',
+        code: 'TU00388',
+        title: 'Pilar Industrial Park',
+        columnId: 'planificacion',
+        contratista: 'Ingeniería & Obras S.A.',
+        estructura: 'TAS 45 MER',
+        fechaInicio: '20/10/26',
+        fechaFin: '28/11/26',
+        prioridad: 'Alta',
+        ubicacion: 'Pilar, BAE',
+        notas: 'Planificación de izaje y compra de materiales previa.',
+        etapas: {
+          relevamiento: 'green',
+          contrato: 'green',
+          gestion_candidato: 'green',
+          mc_cimentacion: 'yellow',
+          ingenieria: 'green',
+          energia_pilar: 'gray',
+          ee_conexion: 'gray',
+          logistica_previa: 'yellow',
+          estructura_prov: 'gray'
+        }
+      },
+      {
+        id: 'proj-107',
+        boardId: 'board-1',
+        code: 'TU00299',
+        title: 'Rosario Norte Hub',
+        columnId: 'ejecucion',
+        contratista: 'Techint Infraestructura',
+        estructura: 'Monopolo 24m',
+        fechaInicio: '15/9/26',
+        fechaFin: '5/11/26',
+        prioridad: 'Alta',
+        ubicacion: 'Rosario, Santa Fe',
+        notas: 'En obra activo. Montaje de tramos en progreso.',
+        etapas: {
+          relevamiento: 'green',
+          contrato: 'green',
+          gestion_candidato: 'green',
+          mc_cimentacion: 'green',
+          ingenieria: 'green',
+          energia_pilar: 'green',
+          ee_conexion: 'yellow',
+          logistica_previa: 'green',
+          estructura_prov: 'green'
+        }
+      },
+      {
+        id: 'proj-108',
+        boardId: 'board-1',
+        code: 'TU00312',
+        title: 'Córdoba Capital Nte',
+        columnId: 'bloqueado',
+        contratista: 'Servicios y Montajes S.R.L.',
+        estructura: 'Mástil Arriostrado 42m',
+        fechaInicio: '1/7/26',
+        fechaFin: '15/10/26',
+        prioridad: 'Alta',
+        ubicacion: 'Córdoba Capital',
+        notas: 'A la espera de factibilidad de distribuidora eléctrica local.',
+        etapas: {
+          relevamiento: 'green',
+          contrato: 'green',
+          gestion_candidato: 'green',
+          mc_cimentacion: 'green',
+          ingenieria: 'green',
+          energia_pilar: 'red',
+          ee_conexion: 'red',
+          logistica_previa: 'green',
+          estructura_prov: 'gray'
+        }
+      },
+      {
+        id: 'proj-109',
+        boardId: 'board-1',
+        code: 'TU00150',
+        title: 'La Plata Ring',
+        columnId: 'finalizado',
+        contratista: 'RAUL',
+        estructura: 'TAS 45 MER',
+        fechaInicio: '10/5/26',
+        fechaFin: '1/9/26',
+        prioridad: 'Normal',
+        ubicacion: 'La Plata, BAE',
+        notas: 'Obra 100% recibida y energizada con éxito.',
+        etapas: {
+          relevamiento: 'green',
+          contrato: 'green',
+          gestion_candidato: 'green',
+          mc_cimentacion: 'green',
+          ingenieria: 'green',
+          energia_pilar: 'green',
+          ee_conexion: 'green',
+          logistica_previa: 'green',
+          estructura_prov: 'green'
+        }
+      },
+      {
+        id: 'proj-110',
+        boardId: 'board-1',
+        code: 'TU00188',
+        title: 'Mendoza Cuyo Site',
+        columnId: 'finalizado',
+        contratista: 'Ingeniería & Obras S.A.',
+        estructura: 'Torre Autosoportada 30m',
+        fechaInicio: '1/6/26',
+        fechaFin: '20/9/26',
+        prioridad: 'Normal',
+        ubicacion: 'Mendoza Cap.',
+        notas: 'Aprobación final de obra y acta firmada.',
+        etapas: {
+          relevamiento: 'green',
+          contrato: 'green',
+          gestion_candidato: 'green',
+          mc_cimentacion: 'green',
+          ingenieria: 'green',
+          energia_pilar: 'green',
+          ee_conexion: 'green',
+          logistica_previa: 'green',
+          estructura_prov: 'green'
+        }
+      }
+    ];
+
+    function App() {
+      const [projects, setProjects] = useState([]);
+      const [searchQuery, setSearchQuery] = useState('');
+      const [filterContratista, setFilterContratista] = useState('ALL');
+      const [filterAlert, setFilterAlert] = useState('ALL');
+      const [soundEnabled, setSoundEnabled] = useState(true);
+
+      // Multi-Board State
+      const [boards, setBoards] = useState(() => {
+        const saved = localStorage.getItem('kanban_obras_boards');
+        if (saved) {
+          try { return JSON.parse(saved); } catch(e) {}
+        }
+        return DEFAULT_BOARDS;
+      });
+
+      const [activeBoardId, setActiveBoardId] = useState(() => {
+        return localStorage.getItem('kanban_obras_active_board') || 'board-1';
+      });
+
+      const [showBoardModal, setShowBoardModal] = useState(false);
+      const [showManageBoardsModal, setShowManageBoardsModal] = useState(false);
+
+      // Editable Columns State
+      const [columns, setColumns] = useState(() => {
+        const savedCols = localStorage.getItem('kanban_obras_columns');
+        if (savedCols) {
+          try { return JSON.parse(savedCols); } catch(e) {}
+        }
+        return DEFAULT_COLUMNS;
+      });
+      const [editingColId, setEditingColId] = useState(null);
+      const [editingColName, setEditingColName] = useState('');
+      
+      // Modals & Drag State
+      const [selectedProject, setSelectedProject] = useState(null);
+      const [isCreating, setIsCreating] = useState(false);
+      const [deleteTargetId, setDeleteTargetId] = useState(null);
+      const [showAnalyticsModal, setShowAnalyticsModal] = useState(false);
+      const [toastMessage, setToastMessage] = useState(null);
+      const [draggedCardId, setDraggedCardId] = useState(null);
+      const [isSyncing, setIsSyncing] = useState(true);
+      const [dbRef, setDbRef] = useState(null);
+      
+      const isInitialMount = useRef(true);
+
+      const saveBoardsToStore = (updatedBoards) => {
+        setBoards(updatedBoards);
+        try {
+          localStorage.setItem('kanban_obras_boards', JSON.stringify(updatedBoards));
+        } catch(e) {}
+      };
+
+      const handleSelectBoard = (boardId) => {
+        setActiveBoardId(boardId);
+        localStorage.setItem('kanban_obras_active_board', boardId);
+        showNotification(`Cambiado a tablero: "${boards.find(b => b.id === boardId)?.name || ''}"`);
+      };
+
+      const handleCreateBoard = (newBoardData) => {
+        const newBoard = {
+          id: 'board-' + Date.now(),
+          name: newBoardData.name.trim() || 'Nuevo Tablero',
+          description: newBoardData.description.trim() || ''
+        };
+        const updated = [...boards, newBoard];
+        saveBoardsToStore(updated);
+        setActiveBoardId(newBoard.id);
+        localStorage.setItem('kanban_obras_active_board', newBoard.id);
+        setShowBoardModal(false);
+        triggerPipSound();
+        showNotification(`Tablero "${newBoard.name}" creado con éxito.`);
+      };
+
+      const handleDeleteBoard = (boardIdToDelete) => {
+        if (boards.length <= 1) {
+          showNotification('⚠️ No se puede eliminar el único tablero.');
+          return;
+        }
+        const updated = boards.filter(b => b.id !== boardIdToDelete);
+        saveBoardsToStore(updated);
+        
+        const updatedProjects = projects.filter(p => (p.boardId || 'board-1') !== boardIdToDelete);
+        saveProjectToStore(updatedProjects);
+
+        if (activeBoardId === boardIdToDelete) {
+          const nextId = updated[0].id;
+          setActiveBoardId(nextId);
+          localStorage.setItem('kanban_obras_active_board', nextId);
+        }
+        triggerPipSound();
+        showNotification('Tablero y sus obras eliminados.');
+      };
+
+      const handleRenameBoard = (boardId, newName) => {
+        if (!newName.trim()) return;
+        const updated = boards.map(b => b.id === boardId ? { ...b, name: newName.trim() } : b);
+        saveBoardsToStore(updated);
+        triggerPipSound();
+        showNotification('Nombre del tablero actualizado.');
+      };
+
+      const triggerPipSound = () => {
+        if (soundEnabled) {
+          playPipSound();
+        }
+      };
+
+      const handleSaveColumnName = (colId) => {
+        if (!editingColName.trim()) {
+          setEditingColId(null);
+          return;
+        }
+        const updated = columns.map(c => c.id === colId ? { ...c, name: editingColName.trim() } : c);
+        setColumns(updated);
+        try {
+          localStorage.setItem('kanban_obras_columns', JSON.stringify(updated));
+        } catch(e) {}
+        setEditingColId(null);
+        triggerPipSound();
+        showNotification('Nombre de columna actualizado');
+      };
+
+      useEffect(() => {
+        let isMounted = true;
+        const initStorage = async () => {
+          try {
+            const appId = typeof __app_id !== 'undefined' ? __app_id : 'obra-kanban-default';
+            const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : null;
+            const customToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+            if (firebaseConfig && window.FirebaseCore) {
+              const { initializeApp, getAuth, signInAnonymously, signInWithCustomToken, getFirestore, collection, onSnapshot, doc, setDoc } = window.FirebaseCore;
+              const app = initializeApp(firebaseConfig);
+              const auth = getAuth(app);
+              const db = getFirestore(app);
+              setDbRef(db);
+
+              if (customToken) {
+                await signInWithCustomToken(auth, customToken);
+              } else {
+                await signInAnonymously(auth);
+              }
+
+              const collectionPath = collection(db, 'artifacts', appId, 'public', 'data', 'construction_projects');
+
+              const unsubscribe = onSnapshot(collectionPath, (snapshot) => {
+                if (!isMounted) return;
+                const loadedProjects = [];
+                let hasRemoteChanges = false;
+
+                snapshot.docChanges().forEach((change) => {
+                  if (!change.doc.metadata.hasPendingWrites) {
+                    hasRemoteChanges = true;
+                  }
+                });
+
+                snapshot.forEach((docSnap) => {
+                  loadedProjects.push({ id: docSnap.id, ...docSnap.data() });
+                });
+
+                if (loadedProjects.length === 0 && snapshot.empty) {
+                  INITIAL_PROJECTS.forEach(proj => {
+                    setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'construction_projects', proj.id), proj);
+                  });
+                  setProjects(INITIAL_PROJECTS);
+                } else {
+                  setProjects(loadedProjects);
+                  if (!isInitialMount.current && hasRemoteChanges) {
+                    triggerPipSound();
+                    showNotification('🔔 Cambio recibido en tiempo real');
+                  }
+                }
+
+                isInitialMount.current = false;
+                setIsSyncing(false);
+              }, (err) => {
+                console.warn('Firestore fallback to local state:', err);
+                fallbackToLocal();
+              });
+
+              return () => unsubscribe();
+            } else {
+              fallbackToLocal();
+            }
+          } catch (e) {
+            console.warn('Storage fallback:', e);
+            fallbackToLocal();
+          }
+        };
+
+        const fallbackToLocal = () => {
+          const saved = localStorage.getItem('kanban_obras_data');
+          if (saved) {
+            try {
+              setProjects(JSON.parse(saved));
+            } catch (e) {
+              setProjects(INITIAL_PROJECTS);
+            }
+          } else {
+            setProjects(INITIAL_PROJECTS);
+          }
+          setIsSyncing(false);
+        };
+
+        initStorage();
+        return () => { isMounted = false; };
+      }, []);
+
+      const saveProjectToStore = async (updatedProjects, singleUpdatedProj = null, isDelete = false, deleteId = null) => {
+        setProjects(updatedProjects);
+        triggerPipSound();
+
+        try {
+          localStorage.setItem('kanban_obras_data', JSON.stringify(updatedProjects));
+          
+          if (dbRef && window.FirebaseCore) {
+            const { doc, setDoc, deleteDoc } = window.FirebaseCore;
+            const appId = typeof __app_id !== 'undefined' ? __app_id : 'obra-kanban-default';
+            
+            if (isDelete && deleteId) {
+              await deleteDoc(doc(dbRef, 'artifacts', appId, 'public', 'data', 'construction_projects', deleteId));
+            } else if (singleUpdatedProj) {
+              await setDoc(doc(dbRef, 'artifacts', appId, 'public', 'data', 'construction_projects', singleUpdatedProj.id), singleUpdatedProj);
+            } else {
+              updatedProjects.forEach(p => {
+                setDoc(doc(dbRef, 'artifacts', appId, 'public', 'data', 'construction_projects', p.id), p);
+              });
+            }
+          }
+        } catch (err) {
+          console.error("Storage error:", err);
+        }
+      };
+
+      const showNotification = (msg) => {
+        setToastMessage(msg);
+        setTimeout(() => setToastMessage(null), 3000);
+      };
+
+      const handleInlineUpdate = (projId, fieldsToUpdate) => {
+        const targetProj = projects.find(p => p.id === projId);
+        if (!targetProj) return;
+
+        const updatedProj = { ...targetProj, ...fieldsToUpdate };
+        const nextProjects = projects.map(p => p.id === projId ? updatedProj : p);
+        saveProjectToStore(nextProjects, updatedProj);
+      };
+
+      const handleMoveCardVertical = (projId, direction) => {
+        const targetProj = projects.find(p => p.id === projId);
+        if (!targetProj) return;
+
+        const colProjects = projects.filter(p => p.columnId === targetProj.columnId);
+        const currentIndex = colProjects.findIndex(p => p.id === projId);
+
+        if (direction === 'up' && currentIndex > 0) {
+          const prevProj = colProjects[currentIndex - 1];
+          const idx1 = projects.findIndex(p => p.id === projId);
+          const idx2 = projects.findIndex(p => p.id === prevProj.id);
+          const updated = [...projects];
+          updated[idx1] = prevProj;
+          updated[idx2] = targetProj;
+          saveProjectToStore(updated);
+        } else if (direction === 'down' && currentIndex < colProjects.length - 1) {
+          const nextProj = colProjects[currentIndex + 1];
+          const idx1 = projects.findIndex(p => p.id === projId);
+          const idx2 = projects.findIndex(p => p.id === nextProj.id);
+          const updated = [...projects];
+          updated[idx1] = nextProj;
+          updated[idx2] = targetProj;
+          saveProjectToStore(updated);
+        }
+      };
+
+      const handleSetEtapaState = (projId, etapaId, colorKey) => {
+        const targetProj = projects.find(p => p.id === projId);
+        if (!targetProj) return;
+
+        const currentVal = targetProj.etapas?.[etapaId] || 'gray';
+        const newVal = currentVal === colorKey ? 'gray' : colorKey;
+
+        const updatedProj = {
+          ...targetProj,
+          etapas: {
+            ...targetProj.etapas,
+            [etapaId]: newVal
+          }
+        };
+
+        const nextProjects = projects.map(p => p.id === projId ? updatedProj : p);
+        saveProjectToStore(nextProjects, updatedProj);
+      };
+
+      const handleCreateProject = (newProjData) => {
+        const id = 'proj-' + Date.now();
+        const codeNumber = Math.floor(100 + Math.random() * 900);
+        const newProj = {
+          id,
+          boardId: activeBoardId,
+          code: newProjData.code || `TU${codeNumber}`,
+          title: newProjData.title || 'Nueva Obra',
+          columnId: newProjData.columnId || 'pendientes',
+          contratista: newProjData.contratista || CONTRATISTAS_DEFAULT[0],
+          estructura: newProjData.estructura || ESTRUCTURAS_DEFAULT[0],
+          fechaInicio: newProjData.fechaInicio || '1/11/26',
+          fechaFin: newProjData.fechaFin || '30/11/26',
+          prioridad: newProjData.prioridad || 'Media',
+          ubicacion: newProjData.ubicacion || 'Por definir',
+          notas: newProjData.notas || '',
+          etapas: newProjData.etapas || {
+            relevamiento: 'gray', contrato: 'gray', gestion_candidato: 'gray',
+            mc_cimentacion: 'gray', ingenieria: 'gray', energia_pilar: 'gray',
+            ee_conexion: 'gray', logistica_previa: 'gray', estructura_prov: 'gray'
+          }
+        };
+
+        const nextState = [newProj, ...projects];
+        saveProjectToStore(nextState, newProj);
+        setIsCreating(false);
+        showNotification(`Obra "${newProj.code}" creada.`);
+      };
+
+      const handleUpdateProject = (updatedProj) => {
+        const nextState = projects.map(p => p.id === updatedProj.id ? updatedProj : p);
+        saveProjectToStore(nextState, updatedProj);
+        setSelectedProject(null);
+        showNotification(`Obra "${updatedProj.code}" actualizada.`);
+      };
+
+      const handleDuplicateProject = (proj) => {
+        const dupId = 'proj-' + Date.now();
+        const dupProj = {
+          ...proj,
+          id: dupId,
+          code: proj.code + '-COP',
+          title: proj.title + ' (Copia)'
+        };
+        const nextState = [dupProj, ...projects];
+        saveProjectToStore(nextState, dupProj);
+        if (selectedProject) setSelectedProject(null);
+        showNotification(`Obra duplicada correctamente.`);
+      };
+
+      const handleDeleteProject = (projId) => {
+        const nextState = projects.filter(p => p.id !== projId);
+        saveProjectToStore(nextState, null, true, projId);
+        setDeleteTargetId(null);
+        if (selectedProject?.id === projId) setSelectedProject(null);
+        showNotification('Obra eliminada.');
+      };
+
+      const handleDragStart = (e, projId) => {
+        e.dataTransfer.setData('text/plain', projId);
+        setDraggedCardId(projId);
+      };
+
+      const handleDragOver = (e) => {
+        e.preventDefault();
+        e.currentTarget.classList.add('drag-over-column');
+      };
+
+      const handleDragLeave = (e) => {
+        e.currentTarget.classList.remove('drag-over-column');
+      };
+
+      const handleDrop = (e, targetColId) => {
+        e.preventDefault();
+        e.currentTarget.classList.remove('drag-over-column');
+        const projId = e.dataTransfer.getData('text/plain') || draggedCardId;
+        if (!projId) return;
+
+        const targetProj = projects.find(p => p.id === projId);
+        if (targetProj && targetProj.columnId !== targetColId) {
+          const updatedProj = { ...targetProj, columnId: targetColId };
+          const nextProjects = projects.map(p => p.id === projId ? updatedProj : p);
+          saveProjectToStore(nextProjects, updatedProj);
+          showNotification(`Obra movida a ${columns.find(c => c.id === targetColId)?.name || targetColId}`);
+        }
+        setDraggedCardId(null);
+      };
+
+      const activeBoard = useMemo(() => {
+        return boards.find(b => b.id === activeBoardId) || boards[0] || DEFAULT_BOARDS[0];
+      }, [boards, activeBoardId]);
+
+      const currentBoardProjects = useMemo(() => {
+        return projects.filter(p => (p.boardId || 'board-1') === activeBoardId);
+      }, [projects, activeBoardId]);
+
+      const filteredProjects = useMemo(() => {
+        return currentBoardProjects.filter(p => {
+          const q = searchQuery.toLowerCase();
+          const matchesQuery = !q || 
+            p.title.toLowerCase().includes(q) || 
+            p.code.toLowerCase().includes(q) || 
+            p.contratista.toLowerCase().includes(q) || 
+            p.ubicacion.toLowerCase().includes(q);
+
+          const matchesContratista = filterContratista === 'ALL' || p.contratista === filterContratista;
+
+          let matchesAlert = true;
+          if (filterAlert === 'RED') {
+            matchesAlert = Object.values(p.etapas || {}).some(v => v === 'red');
+          } else if (filterAlert === 'YELLOW') {
+            matchesAlert = Object.values(p.etapas || {}).some(v => v === 'yellow');
+          }
+
+          return matchesQuery && matchesContratista && matchesAlert;
+        });
+      }, [currentBoardProjects, searchQuery, filterContratista, filterAlert]);
+
+      const stats = useMemo(() => {
+        const total = currentBoardProjects.length;
+        const enEjecucion = currentBoardProjects.filter(p => p.columnId === 'ejecucion').length;
+        const bloqueados = currentBoardProjects.filter(p => p.columnId === 'bloqueado').length;
+        const conAlertaRoja = currentBoardProjects.filter(p => Object.values(p.etapas || {}).some(v => v === 'red')).length;
+        return { total, enEjecucion, bloqueados, conAlertaRoja };
+      }, [currentBoardProjects]);
+
+      const availableContratistas = useMemo(() => {
+        const list = new Set(CONTRATISTAS_DEFAULT);
+        projects.forEach(p => {
+          if (p.contratista) list.add(p.contratista);
+        });
+        return Array.from(list);
+      }, [projects]);
+
+      const handleSaveData = () => {
+        try {
+          localStorage.setItem('kanban_obras_columns', JSON.stringify(columns));
+          localStorage.setItem('kanban_obras_boards', JSON.stringify(boards));
+          saveProjectToStore(projects);
+          showNotification('💾 ¡Todos los cambios han sido guardados!');
+        } catch (e) {
+          showNotification('⚠ Error al guardar los datos');
+        }
+      };
+
+      return (
+        <div className="flex flex-col h-screen bg-slate-100 overflow-hidden">
+          {/* HEADER BAR */}
+          <header className="bg-slate-900 text-white border-b border-slate-800 shadow-lg flex-shrink-0 z-20">
+            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3">
+              <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                
+                {/* Title & Brand + Board Switcher Selector */}
+                <div className="flex flex-wrap items-center gap-3">
+                  <div className="bg-white/95 rounded-xl p-1.5 shadow-md flex items-center justify-center h-11 px-2.5 border border-slate-200/30">
+                    <svg className="h-8 w-auto" viewBox="0 0 160 55" fill="none" xmlns="http://www.w3.org/2000/svg">
+                      <g id="hook-icon">
+                        <ellipse cx="20" cy="14" rx="7" ry="10" stroke="#71717a" strokeWidth="3.5" fill="none"/>
+                        <path d="M 13,22 C 13,38 27,42 27,33 C 27,27 20,27 20,27" stroke="#dc2626" strokeWidth="4.5" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
+                        <circle cx="13" cy="22" r="2.5" fill="#dc2626"/>
+                        <rect x="8" y="32" width="24" height="16" rx="4" stroke="#94a3b8" strokeWidth="3" fill="none"/>
+                      </g>
+                      <text x="46" y="24" fontFamily="'Inter', sans-serif" fontWeight="800" fontSize="22" fill="#b91c1c" letterSpacing="-0.5">Total</text>
+                      <text x="46" y="46" fontFamily="'Inter', sans-serif" fontWeight="700" fontSize="21" fill="none" stroke="#475569" strokeWidth="1.5" letterSpacing="0.5">Obras</text>
+                    </svg>
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h1 className="text-lg font-bold tracking-tight text-white flex items-center gap-2">
+                        Obras SITES
+                      </h1>
+                      <span className="text-xs bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 px-2 py-0.5 rounded-full flex items-center gap-1">
+                        <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                        Tiempo Real
+                      </span>
+                    </div>
+
+                    {/* SELECTOR DE TABLEROS */}
+                    <div className="flex items-center gap-1.5 mt-0.5">
+                      <div className="relative group">
+                        <select
+                          value={activeBoardId}
+                          onChange={(e) => handleSelectBoard(e.target.value)}
+                          className="bg-slate-800 hover:bg-slate-700 text-sky-300 text-xs font-semibold rounded-lg px-2.5 py-1 border border-slate-700 focus:outline-none focus:border-sky-500 cursor-pointer transition pr-6"
+                        >
+                          {boards.map(b => (
+                            <option key={b.id} value={b.id}>
+                              📋 {b.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <button
+                        onClick={() => setShowBoardModal(true)}
+                        className="bg-slate-800 hover:bg-sky-600/30 text-sky-400 hover:text-sky-200 border border-slate-700 px-2 py-1 rounded-lg text-xs font-semibold transition flex items-center gap-1"
+                        title="Crear nuevo tablero"
+                      >
+                        <i className="fa-solid fa-plus text-[10px]"></i>
+                        <span className="hidden sm:inline">Nuevo Tablero</span>
+                      </button>
+
+                      <button
+                        onClick={() => setShowManageBoardsModal(true)}
+                        className="bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white border border-slate-700 p-1.5 rounded-lg text-xs transition"
+                        title="Gestionar Tableros"
+                      >
+                        <i className="fa-solid fa-gear text-xs"></i>
+                      </button>
+                    </div>
+
+                  </div>
+                </div>
+
+                {/* Stat Badges */}
+                <div className="hidden lg:flex items-center space-x-3 text-xs">
+                  <div className="bg-slate-800/80 border border-slate-700 px-3 py-1.5 rounded-lg flex items-center space-x-2">
+                    <span className="text-slate-400">Obras en Tablero:</span>
+                    <span className="font-bold text-white">{stats.total}</span>
+                  </div>
+                  <div className="bg-blue-950/60 border border-blue-800/50 px-3 py-1.5 rounded-lg flex items-center space-x-2">
+                    <span className="text-blue-300">En Ejecución:</span>
+                    <span className="font-bold text-blue-200">{stats.enEjecucion}</span>
+                  </div>
+                  <div className="bg-red-950/60 border border-red-800/50 px-3 py-1.5 rounded-lg flex items-center space-x-2">
+                    <span className="text-red-300">Bloqueadas:</span>
+                    <span className="font-bold text-red-200">{stats.bloqueados}</span>
+                  </div>
+                </div>
+
+                {/* Actions */}
+                <div className="flex items-center space-x-2">
+                  <button 
+                    onClick={() => {
+                      setSoundEnabled(!soundEnabled);
+                      if (!soundEnabled) playPipSound();
+                    }}
+                    className={`text-xs font-semibold px-3 py-2 rounded-lg border transition flex items-center gap-1.5 ${
+                      soundEnabled 
+                        ? 'bg-sky-500/20 text-sky-300 border-sky-500/40 hover:bg-sky-500/30' 
+                        : 'bg-slate-800 text-slate-400 border-slate-700 hover:text-white'
+                    }`}
+                    title={soundEnabled ? 'Sonido "pip" Activado' : 'Sonido Silenciado'}
+                  >
+                    <i className={`fa-solid ${soundEnabled ? 'fa-volume-high text-sky-400' : 'fa-volume-xmark text-slate-500'}`}></i>
+                    <span>{soundEnabled ? 'Sonido Pip' : 'Mute'}</span>
+                  </button>
+
+                  <button 
+                    onClick={handleSaveData}
+                    className="bg-emerald-600 hover:bg-emerald-700 text-white border border-emerald-500 text-xs font-medium px-3 py-2 rounded-lg flex items-center space-x-1.5 transition shadow-sm"
+                    title="Guardar Cambios"
+                  >
+                    <i className="fa-solid fa-floppy-disk text-emerald-200"></i>
+                    <span className="hidden sm:inline">Guardar</span>
+                  </button>
+
+                  <button 
+                    onClick={() => setShowAnalyticsModal(true)}
+                    className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-medium px-3 py-2 rounded-lg flex items-center space-x-1.5 transition"
+                    title="Ver Métricas"
+                  >
+                    <i className="fa-solid fa-chart-pie text-sky-400"></i>
+                    <span className="hidden sm:inline">Métricas</span>
+                  </button>
+
+                  <button 
+                    onClick={() => setIsCreating(true)}
+                    className="bg-gradient-to-r from-sky-500 to-blue-600 hover:from-sky-600 hover:to-blue-700 text-white text-xs font-semibold px-4 py-2 rounded-lg shadow-md hover:shadow-sky-500/25 transition flex items-center space-x-2"
+                  >
+                    <i className="fa-solid fa-plus"></i>
+                    <span>Nueva Obra</span>
+                  </button>
+                </div>
+
+              </div>
+
+              {/* SEARCH & FILTERS */}
+              <div className="mt-3 pt-3 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-3 text-xs">
+                <div className="flex flex-wrap items-center gap-2 flex-1 min-w-[280px]">
+                  <div className="relative flex-1 min-w-[200px]">
+                    <i className="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"></i>
+                    <input 
+                      type="text"
+                      placeholder={`Buscar en ${activeBoard.name}...`}
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      className="w-full bg-slate-800/90 border border-slate-700 text-white placeholder-slate-400 text-xs rounded-lg pl-9 pr-3 py-1.5 focus:outline-none focus:border-sky-500"
+                    />
+                    {searchQuery && (
+                      <button onClick={() => setSearchQuery('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white">
+                        <i className="fa-solid fa-xmark"></i>
+                      </button>
+                    )}
+                  </div>
+
+                  <select 
+                    value={filterContratista}
+                    onChange={(e) => setFilterContratista(e.target.value)}
+                    className="bg-slate-800/90 border border-slate-700 text-slate-200 text-xs rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-sky-500 cursor-pointer"
+                  >
+                    <option value="ALL">Todos los Contratistas</option>
+                    {availableContratistas.map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
+
+                  <select 
+                    value={filterAlert}
+                    onChange={(e) => setFilterAlert(e.target.value)}
+                    className="bg-slate-800/90 border border-slate-700 text-slate-200 text-xs rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-sky-500 cursor-pointer"
+                  >
+                    <option value="ALL">Todas las Alertas</option>
+                    <option value="RED">Con Alerta Roja 🔴</option>
+                    <option value="YELLOW">Con Precaución 🟡</option>
+                  </select>
+                </div>
+
+                {(searchQuery || filterContratista !== 'ALL' || filterAlert !== 'ALL') && (
+                  <button 
+                    onClick={() => { setSearchQuery(''); setFilterContratista('ALL'); setFilterAlert('ALL'); }}
+                    className="text-sky-400 hover:text-sky-300 underline text-xs flex items-center gap-1"
+                  >
+                    <i className="fa-solid fa-rotate-left"></i> Limpiar
+                  </button>
+                )}
+              </div>
+            </div>
+          </header>
+
+          <main className="flex-1 overflow-x-auto p-4 sm:p-6 custom-scrollbar">
+            <div className="flex space-x-4 h-full items-start min-w-[1280px]">
+              {columns.map((col) => {
+                const colProjects = filteredProjects.filter(p => p.columnId === col.id);
+
+                return (
+                  <div
+                    key={col.id}
+                    onDragOver={handleDragOver}
+                    onDragLeave={handleDragLeave}
+                    onDrop={(e) => handleDrop(e, col.id)}
+                    className={`w-80 flex-shrink-0 flex flex-col max-h-full rounded-2xl border-t-4 ${col.color} bg-slate-200/60 shadow-sm transition-all duration-150 overflow-hidden`}
+                  >
+                    {/* COLUMN HEADER */}
+                    <div className="p-3 bg-white/80 backdrop-blur-sm border-b border-slate-200/80 flex items-center justify-between">
+                      <div className="flex items-center space-x-2 flex-1 min-w-0 pr-2">
+                        <i className={`${col.icon} ${col.text} text-sm`}></i>
+                        
+                        {/* INLINE EDIT COLUMN TITLE */}
+                        {editingColId === col.id ? (
+                          <input
+                            type="text"
+                            autoFocus
+                            value={editingColName}
+                            onChange={(e) => setEditingColName(e.target.value)}
+                            onBlur={() => handleSaveColumnName(col.id)}
+                            onKeyDown={(e) => e.key === 'Enter' && handleSaveColumnName(col.id)}
+                            className="text-xs font-bold bg-white border border-sky-500 rounded px-1.5 py-0.5 text-slate-900 focus:outline-none w-full"
+                          />
+                        ) : (
+                          <h2 
+                            onClick={() => { setEditingColId(col.id); setEditingColName(col.name); }}
+                            className="font-bold text-xs text-slate-800 tracking-tight truncate cursor-pointer hover:text-sky-600 transition"
+                            title="Clic para editar título de columna"
+                          >
+                            {col.name}
+                          </h2>
+                        )}
+                      </div>
+
+                      <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${col.badge}`}>
+                        {colProjects.length}
+                      </span>
+                    </div>
+
+                    {/* CARDS LIST CONTAINER */}
+                    <div className="p-2.5 overflow-y-auto flex-1 space-y-3 custom-scrollbar">
+                      {colProjects.map((proj, idx) => (
+                        <KanbanCard 
+                          key={proj.id}
+                          project={proj}
+                          isFirst={idx === 0}
+                          isLast={idx === colProjects.length - 1}
+                          onSelect={() => setSelectedProject(proj)}
+                          onInlineUpdate={(fields) => handleInlineUpdate(proj.id, fields)}
+                          onSetEtapaState={(etapaId, colorKey) => handleSetEtapaState(proj.id, etapaId, colorKey)}
+                          onMoveVertical={(dir) => handleMoveCardVertical(proj.id, dir)}
+                          onDuplicate={() => handleDuplicateProject(proj)}
+                          onDelete={() => setDeleteTargetId(proj.id)}
+                          onDragStart={(e) => handleDragStart(e, proj.id)}
+                        />
+                      ))}
+
+                      {colProjects.length === 0 && (
+                        <div className="h-28 border-2 border-dashed border-slate-300 rounded-xl flex items-center justify-center text-slate-400 text-xs font-medium italic">
+                          Sin obras en esta columna
+                        </div>
+                      )}
+                    </div>
+
+                    {/* ADD QUICK BUTTON AT BOTTOM OF COLUMN */}
+                    <div className="p-2 bg-slate-100/80 border-t border-slate-300 text-center">
+                      <button 
+                        onClick={() => {
+                          setIsCreating(true);
+                          setTimeout(() => {
+                            const el = document.getElementById('new-proj-col');
+                            if (el) el.value = col.id;
+                          }, 50);
+                        }}
+                        className="w-full text-xs font-medium text-slate-600 hover:text-slate-900 hover:bg-white/70 py-1.5 rounded-lg border border-transparent hover:border-slate-300 transition flex items-center justify-center gap-1"
+                      >
+                        <i className="fa-solid fa-plus text-[10px]"></i> Agregar Obra a {col.name}
+                      </button>
+                    </div>
+
+                  </div>
+                );
+              })}
+            </div>
+          </main>
+
+          {/* TOAST NOTIFICATION */}
+          {toastMessage && (
+            <div className="fixed bottom-5 right-5 z-50 bg-slate-900 text-white text-xs font-medium px-4 py-3 rounded-xl shadow-2xl border border-slate-700 flex items-center space-x-2 animate-bounce">
+              <i className="fa-solid fa-bell text-sky-400 text-sm"></i>
+              <span>{toastMessage}</span>
+            </div>
+          )}
+
+          {/* MODAL: CREATE BOARD */}
+          {showBoardModal && (
+            <CreateBoardModal 
+              onCreate={handleCreateBoard}
+              onClose={() => setShowBoardModal(false)}
+            />
+          )}
+
+          {/* MODAL: MANAGE BOARDS */}
+          {showManageBoardsModal && (
+            <ManageBoardsModal 
+              boards={boards}
+              activeBoardId={activeBoardId}
+              onSelectBoard={handleSelectBoard}
+              onRenameBoard={handleRenameBoard}
+              onDeleteBoard={handleDeleteBoard}
+              onClose={() => setShowManageBoardsModal(false)}
+              onOpenCreate={() => { setShowManageBoardsModal(false); setShowBoardModal(true); }}
+            />
+          )}
+
+          {/* MODAL: EDIT DETAILS */}
+          {selectedProject && (
+            <ProjectEditModal 
+              project={selectedProject}
+              columns={columns}
+              onSave={handleUpdateProject}
+              onClose={() => setSelectedProject(null)}
+              onDuplicate={() => handleDuplicateProject(selectedProject)}
+              onDelete={() => setDeleteTargetId(selectedProject.id)}
+              availableContratistas={availableContratistas}
+            />
+          )}
+
+          {/* MODAL: CREATE NEW PROJECT */}
+          {isCreating && (
+            <ProjectCreateModal 
+              columns={columns}
+              onCreate={handleCreateProject}
+              onClose={() => setIsCreating(false)}
+              availableContratistas={availableContratistas}
+            />
+          )}
+
+          {/* MODAL: DELETE CONFIRMATION */}
+          {deleteTargetId && (
+            <DeleteConfirmModal 
+              onConfirm={() => handleDeleteProject(deleteTargetId)}
+              onCancel={() => setDeleteTargetId(null)}
+            />
+          )}
+
+          {/* MODAL: ANALYTICS */}
+          {showAnalyticsModal && (
+            <AnalyticsModal 
+              projects={currentBoardProjects}
+              onClose={() => setShowAnalyticsModal(false)}
+            />
+          )}
+
+        </div>
+      );
+    }
+
+    function CreateBoardModal({ onCreate, onClose }) {
+      const [name, setName] = useState('');
+      const [description, setDescription] = useState('');
+
+      const handleSubmit = (e) => {
+        e.preventDefault();
+        if (!name.trim()) return;
+        onCreate({ name, description });
+      };
+
+      return (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-md overflow-hidden">
+            <div className="bg-slate-900 text-white p-4 px-6 flex items-center justify-between border-b border-slate-800">
+              <h3 className="font-bold text-sm flex items-center gap-2">
+                <i className="fa-solid fa-layer-group text-sky-400"></i> Crear Nuevo Tablero
+              </h3>
+              <button onClick={onClose} className="text-slate-400 hover:text-white">
+                <i className="fa-solid fa-xmark"></i>
+              </button>
+            </div>
+            <form onSubmit={handleSubmit} className="p-6 space-y-4 text-xs">
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">Nombre del Tablero *</label>
+                <input 
+                  type="text"
+                  required
+                  autoFocus
+                  placeholder="Ej: Obras Mantenimiento Norte"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-sky-500 focus:outline-none"
+                />
+              </div>
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">Descripción / Objetivo</label>
+                <textarea 
+                  rows={2}
+                  placeholder="Ej: Seguimiento de obras de fibra y adecuación de sitio"
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  className="w-full border border-slate-300 rounded-lg p-2.5 focus:ring-2 focus:ring-sky-500 focus:outline-none"
+                ></textarea>
+              </div>
+              <div className="pt-3 border-t border-slate-200 flex items-center justify-end space-x-2">
+                <button 
+                  type="button" 
+                  onClick={onClose}
+                  className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold px-4 py-2 rounded-lg transition"
+                >
+                  Cancelar
+                </button>
+                <button 
+                  type="submit"
+                  className="bg-sky-600 hover:bg-sky-700 text-white font-bold px-5 py-2 rounded-lg shadow-md transition flex items-center gap-1.5"
+                >
+                  <i className="fa-solid fa-check"></i> Crear Tablero
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      );
+    }
+
+    function ManageBoardsModal({ boards, activeBoardId, onSelectBoard, onRenameBoard, onDeleteBoard, onClose, onOpenCreate }) {
+      const [editingId, setEditingId] = useState(null);
+      const [editingName, setEditingName] = useState('');
+
+      const handleStartRename = (b) => {
+        setEditingId(b.id);
+        setEditingName(b.name);
+      };
+
+      const handleSaveRename = (bId) => {
+        onRenameBoard(bId, editingName);
+        setEditingId(null);
+      };
+
+      return (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-lg overflow-hidden flex flex-col max-h-[80vh]">
+            <div className="bg-slate-900 text-white p-4 px-6 flex items-center justify-between border-b border-slate-800">
+              <h3 className="font-bold text-sm flex items-center gap-2">
+                <i className="fa-solid fa-gear text-sky-400"></i> Gestionar Tableros
+              </h3>
+              <button onClick={onClose} className="text-slate-400 hover:text-white">
+                <i className="fa-solid fa-xmark"></i>
+              </button>
+            </div>
+            
+            <div className="p-6 overflow-y-auto space-y-3 flex-1 custom-scrollbar text-xs">
+              {boards.map(b => (
+                <div 
+                  key={b.id}
+                  className={`p-3 rounded-xl border flex items-center justify-between gap-3 transition ${
+                    b.id === activeBoardId 
+                      ? 'bg-sky-50 border-sky-300 ring-1 ring-sky-300' 
+                      : 'bg-slate-50 border-slate-200 hover:bg-slate-100'
+                  }`}
+                >
+                  <div className="flex-1 min-w-0">
+                    {editingId === b.id ? (
+                      <div className="flex items-center gap-2">
+                        <input 
+                          type="text"
+                          value={editingName}
+                          onChange={(e) => setEditingName(e.target.value)}
+                          onKeyDown={(e) => e.key === 'Enter' && handleSaveRename(b.id)}
+                          className="border border-sky-500 rounded px-2 py-1 text-xs font-bold w-full bg-white focus:outline-none"
+                          autoFocus
+                        />
+                        <button onClick={() => handleSaveRename(b.id)} className="bg-emerald-600 text-white px-2 py-1 rounded font-semibold text-xs">
+                          OK
+                        </button>
+                      </div>
+                    ) : (
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <h4 className="font-bold text-slate-900 truncate">{b.name}</h4>
+                          {b.id === activeBoardId && (
+                            <span className="text-[10px] bg-sky-200 text-sky-900 font-bold px-2 py-0.5 rounded-full">Activo</span>
+                          )}
+                        </div>
+                        {b.description && <p className="text-[11px] text-slate-500 truncate mt-0.5">{b.description}</p>}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="flex items-center space-x-1.5 flex-shrink-0">
+                    {b.id !== activeBoardId && (
+                      <button 
+                        onClick={() => { onSelectBoard(b.id); onClose(); }}
+                        className="bg-white border border-slate-300 text-slate-700 hover:bg-sky-600 hover:text-white hover:border-sky-600 px-2.5 py-1 rounded-lg font-semibold transition text-xs"
+                      >
+                        Abrir
+                      </button>
+                    )}
+                    <button 
+                      onClick={() => handleStartRename(b)}
+                      className="p-1.5 text-slate-400 hover:text-slate-700 rounded transition"
+                      title="Renombrar"
+                    >
+                      <i className="fa-solid fa-pen"></i>
+                    </button>
+                    {boards.length > 1 && (
+                      <button 
+                        onClick={() => onDeleteBoard(b.id)}
+                        className="p-1.5 text-slate-400 hover:text-red-600 rounded transition"
+                        title="Eliminar Tablero"
+                      >
+                        <i className="fa-solid fa-trash-can"></i>
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="p-4 bg-slate-50 border-t border-slate-200 flex items-center justify-between">
+              <button 
+                onClick={onOpenCreate}
+                className="bg-sky-600 hover:bg-sky-700 text-white font-bold text-xs px-4 py-2 rounded-lg transition flex items-center gap-1.5"
+              >
+                <i className="fa-solid fa-plus"></i> Nuevo Tablero
+              </button>
+              <button 
+                onClick={onClose}
+                className="bg-slate-200 hover:bg-slate-300 text-slate-800 font-semibold text-xs px-4 py-2 rounded-lg transition"
+              >
+                Cerrar
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    function KanbanCard({ 
+      project, 
+      isFirst, 
+      isLast, 
+      onSelect, 
+      onInlineUpdate, 
+      onSetEtapaState, 
+      onMoveVertical, 
+      onDuplicate, 
+      onDelete, 
+      onDragStart 
+    }) {
+      const [isEditingCode, setIsEditingCode] = useState(false);
+      const [isEditingTitle, setIsEditingTitle] = useState(false);
+      const [tempCode, setTempCode] = useState(project.code);
+      const [tempTitle, setTempTitle] = useState(project.title);
+
+      useEffect(() => {
+        setTempCode(project.code);
+        setTempTitle(project.title);
+      }, [project.code, project.title]);
+
+      const handleSaveCode = () => {
+        setIsEditingCode(false);
+        if (tempCode.trim() && tempCode !== project.code) {
+          onInlineUpdate({ code: tempCode.trim() });
+        } else {
+          setTempCode(project.code);
+        }
+      };
+
+      const handleSaveTitle = () => {
+        setIsEditingTitle(false);
+        if (tempTitle.trim() && tempTitle !== project.title) {
+          onInlineUpdate({ title: tempTitle.trim() });
+        } else {
+          setTempTitle(project.title);
+        }
+      };
+
+      const TrafficLightGroup = ({ etapaId }) => {
+        const currentVal = project.etapas?.[etapaId] || 'gray';
+
+        return (
+          <div className="flex items-center space-x-1 pl-1">
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); onSetEtapaState(etapaId, 'red'); }}
+              className={`w-3.5 h-3.5 rounded-full transition-all ${
+                currentVal === 'red' 
+                  ? 'bg-red-600 ring-2 ring-red-400 scale-110 shadow' 
+                  : 'bg-red-200 hover:bg-red-400 opacity-60'
+              }`}
+              title="Crítico / Alerta (Rojo)"
+            />
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); onSetEtapaState(etapaId, 'yellow'); }}
+              className={`w-3.5 h-3.5 rounded-full transition-all ${
+                currentVal === 'yellow' 
+                  ? 'bg-amber-400 ring-2 ring-amber-300 scale-110 shadow' 
+                  : 'bg-amber-200 hover:bg-amber-300 opacity-60'
+              }`}
+              title="En Riesgo / En Curso (Amarillo)"
+            />
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); onSetEtapaState(etapaId, 'green'); }}
+              className={`w-3.5 h-3.5 rounded-full transition-all ${
+                currentVal === 'green' 
+                  ? 'bg-emerald-500 ring-2 ring-emerald-300 scale-110 shadow' 
+                  : 'bg-emerald-200 hover:bg-emerald-400 opacity-60'
+              }`}
+              title="Completado / OK (Verde)"
+            />
+          </div>
+        );
+      };
+
+      return (
+        <div 
+          draggable
+          onDragStart={onDragStart}
+          className="bg-white rounded-xl border-2 border-slate-300 hover:border-slate-400 shadow-md transition-all p-3 text-xs text-slate-800 font-medium relative group cursor-grab active:cursor-grabbing"
+        >
+          {/* HEADER ROW: CODE — TITLE & ACTIONS */}
+          <div className="flex items-start justify-between gap-2 pb-2 mb-2 border-b border-slate-200">
+            <div className="flex-1 flex flex-wrap items-center gap-1 min-w-0 font-extrabold text-sm sm:text-base text-slate-900 tracking-tight leading-tight">
+              {isEditingCode ? (
+                <input
+                  type="text"
+                  autoFocus
+                  value={tempCode}
+                  onChange={(e) => setTempCode(e.target.value)}
+                  onBlur={handleSaveCode}
+                  onKeyDown={(e) => e.key === 'Enter' && handleSaveCode()}
+                  className="border-2 border-sky-500 rounded px-1 py-0.5 text-xs font-mono bg-sky-50 text-slate-900 focus:outline-none w-24"
+                />
+              ) : (
+                <span 
+                  onClick={() => setIsEditingCode(true)}
+                  className="cursor-pointer hover:bg-sky-100 hover:text-sky-800 px-1 rounded transition border border-transparent hover:border-sky-300 font-black text-slate-900"
+                  title="Clic para editar Código directamente"
+                >
+                  {project.code || 'SIN_CODIGO'}
+                </span>
+              )}
+
+              <span className="text-slate-400 font-bold">—</span>
+
+              {isEditingTitle ? (
+                <input
+                  type="text"
+                  autoFocus
+                  value={tempTitle}
+                  onChange={(e) => setTempTitle(e.target.value)}
+                  onBlur={handleSaveTitle}
+                  onKeyDown={(e) => e.key === 'Enter' && handleSaveTitle()}
+                  className="border-2 border-sky-500 rounded px-1 py-0.5 text-xs bg-sky-50 text-slate-900 focus:outline-none flex-1 min-w-[100px]"
+                />
+              ) : (
+                <span 
+                  onClick={() => setIsEditingTitle(true)}
+                  className="cursor-pointer hover:bg-sky-100 hover:text-sky-800 px-1 rounded transition border border-transparent hover:border-sky-300 truncate font-bold text-slate-900"
+                  title="Clic para editar Título directamente"
+                >
+                  {project.title || 'Sin Título'}
+                </span>
+              )}
+            </div>
+
+            {/* ACTION BUTTONS & REORDER CONTROLS */}
+            <div className="flex items-center space-x-1 flex-shrink-0 text-slate-400">
+              <div className="flex flex-col space-y-0.5 mr-1 border-r border-slate-200 pr-1">
+                <button
+                  type="button"
+                  disabled={isFirst}
+                  onClick={(e) => { e.stopPropagation(); onMoveVertical('up'); }}
+                  className={`w-4 h-4 rounded flex items-center justify-center text-[10px] ${isFirst ? 'text-slate-200 cursor-not-allowed' : 'text-slate-600 hover:bg-slate-200 hover:text-slate-900'}`}
+                  title="Desplazar hacia Arriba"
+                >
+                  <i className="fa-solid fa-chevron-up"></i>
+                </button>
+                <button
+                  type="button"
+                  disabled={isLast}
+                  onClick={(e) => { e.stopPropagation(); onMoveVertical('down'); }}
+                  className={`w-4 h-4 rounded flex items-center justify-center text-[10px] ${isLast ? 'text-slate-200 cursor-not-allowed' : 'text-slate-600 hover:bg-slate-200 hover:text-slate-900'}`}
+                  title="Desplazar hacia Abajo"
+                >
+                  <i className="fa-solid fa-chevron-down"></i>
+                </button>
+              </div>
+
+              <button 
+                type="button"
+                onClick={onSelect}
+                className="w-6 h-6 rounded hover:bg-slate-100 flex items-center justify-center text-slate-500 hover:text-sky-600 transition"
+                title="Editar formulario completo"
+              >
+                <i className="fa-solid fa-pen text-xs"></i>
+              </button>
+
+              <button 
+                type="button"
+                onClick={onDuplicate}
+                className="w-6 h-6 rounded hover:bg-slate-100 flex items-center justify-center text-slate-500 hover:text-amber-600 transition"
+                title="Duplicar Obra"
+              >
+                <i className="fa-regular fa-copy text-xs"></i>
+              </button>
+
+              <button 
+                type="button"
+                onClick={onDelete}
+                className="w-6 h-6 rounded hover:bg-red-50 flex items-center justify-center text-slate-400 hover:text-red-600 transition"
+                title="Eliminar Obra"
+              >
+                <i className="fa-solid fa-trash-can text-xs"></i>
+              </button>
+            </div>
+          </div>
+
+          {/* MATRIX SECTION 1: RELEVAMIENTO, CONTRATO, GESTION CANDIDATO */}
+          <div className="space-y-1.5 pb-2 border-b border-slate-200">
+            <div className="grid grid-cols-2 gap-2 items-center">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-bold text-slate-700 tracking-tight">RELEVAMIENTO</span>
+                <TrafficLightGroup etapaId="relevamiento" />
+              </div>
+
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-bold text-slate-700 tracking-tight">GESTION CANDIDATO</span>
+                <TrafficLightGroup etapaId="gestion_candidato" />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2 items-center">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-bold text-slate-700 tracking-tight">CONTRATO</span>
+                <TrafficLightGroup etapaId="contrato" />
+              </div>
+              <div></div>
+            </div>
+          </div>
+
+          {/* MATRIX SECTION 2: MC CIMENTACION, INGENIERIA, ESTRUCT. HOMOLOGADA */}
+          <div className="space-y-1.5 py-2 border-b border-slate-200">
+            <div className="grid grid-cols-2 gap-2 items-center">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-bold text-slate-700 tracking-tight">MC CIMENTACION</span>
+                <TrafficLightGroup etapaId="mc_cimentacion" />
+              </div>
+
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-bold text-slate-700 tracking-tight">INGENIERIA</span>
+                <TrafficLightGroup etapaId="ingenieria" />
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between gap-1 pt-0.5">
+              <span className="text-[10px] font-bold text-slate-700 tracking-tight flex-shrink-0">ESTRUCT. HOMOLOGADA</span>
+              <input 
+                type="text" 
+                value={project.estructura || ''}
+                onChange={(e) => onInlineUpdate({ estructura: e.target.value })}
+                placeholder="Ej: TAS 45 MER"
+                className="w-28 text-right border border-slate-300 rounded px-1.5 py-0.5 text-[11px] bg-slate-50 focus:bg-white focus:outline-none focus:ring-1 focus:ring-sky-500 font-semibold text-slate-800"
+              />
+            </div>
+          </div>
+
+          {/* MATRIX SECTION 3: ENERGIA PILAR, EE CONEXION, LOGISTICA PREVIA, ESTRUCT. PROV */}
+          <div className="space-y-1.5 py-2 border-b border-slate-200">
+            <div className="grid grid-cols-2 gap-2 items-center">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-bold text-slate-700 tracking-tight">ENERGIA - PILAR</span>
+                <TrafficLightGroup etapaId="energia_pilar" />
+              </div>
+
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-bold text-slate-700 tracking-tight">EE CONEXIÓN</span>
+                <TrafficLightGroup etapaId="ee_conexion" />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2 items-center">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-bold text-slate-700 tracking-tight">LOGISTICA PREVIA</span>
+                <TrafficLightGroup etapaId="logistica_previa" />
+              </div>
+
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-bold text-slate-700 tracking-tight">ESTRUCT. PROV</span>
+                <TrafficLightGroup etapaId="estructura_prov" />
+              </div>
+            </div>
+          </div>
+
+          {/* MATRIX SECTION 4: CTTA ASIGNADO, F. INI, F. FIN */}
+          <div className="pt-2">
+            <div className="space-y-1.5 max-w-[260px]">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[10px] font-bold text-slate-700 tracking-tight flex-shrink-0">CTTA ASIGNADO</span>
+                <input 
+                  type="text" 
+                  value={project.contratista || ''}
+                  onChange={(e) => onInlineUpdate({ contratista: e.target.value })}
+                  placeholder="RAUL"
+                  className="w-28 text-center border border-slate-300 rounded px-1 py-0.5 text-[11px] bg-slate-50 focus:bg-white focus:outline-none focus:ring-1 focus:ring-sky-500 font-semibold text-slate-800 uppercase"
+                />
+              </div>
+
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[10px] font-bold text-slate-700 tracking-tight flex-shrink-0">F. INI ESTIMADO</span>
+                <input 
+                  type="text"
+                  value={project.fechaInicio || ''}
+                  onChange={(e) => onInlineUpdate({ fechaInicio: e.target.value })}
+                  placeholder="5/10/26"
+                  className="w-24 text-center border border-slate-300 rounded px-1 py-0.5 text-[10px] bg-slate-50 focus:bg-white focus:outline-none focus:ring-1 focus:ring-sky-500 font-mono font-medium text-slate-800"
+                />
+              </div>
+
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[10px] font-bold text-slate-700 tracking-tight flex-shrink-0">F. FIN ESTIMADO</span>
+                <input 
+                  type="text"
+                  value={project.fechaFin || ''}
+                  onChange={(e) => onInlineUpdate({ fechaFin: e.target.value })}
+                  placeholder="30/10/26"
+                  className="w-24 text-center border border-slate-300 rounded px-1 py-0.5 text-[10px] bg-slate-50 focus:bg-white focus:outline-none focus:ring-1 focus:ring-sky-500 font-mono font-medium text-slate-800"
+                />
+              </div>
+            </div>
+          </div>
+
+        </div>
+      );
+    }
+
+    function ProjectEditModal({ project, columns, onSave, onClose, onDuplicate, onDelete, availableContratistas }) {
+      const [formData, setFormData] = useState({ ...project });
+
+      const handleChange = (field, val) => {
+        setFormData(prev => ({ ...prev, [field]: val }));
+      };
+
+      const handleSubmit = (e) => {
+        e.preventDefault();
+        onSave(formData);
+      };
+
+      return (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-2xl overflow-hidden flex flex-col max-h-[90vh]">
+            
+            <div className="bg-slate-900 text-white p-4 px-6 flex items-center justify-between border-b border-slate-800">
+              <div className="flex items-center space-x-3">
+                <span className="font-mono text-xs bg-sky-500 text-slate-950 font-black px-2.5 py-1 rounded-md">
+                  {formData.code}
+                </span>
+                <h2 className="text-base font-bold truncate max-w-md">Editar Detalles de Obra</h2>
+              </div>
+              <button onClick={onClose} className="text-slate-400 hover:text-white text-lg">
+                <i className="fa-solid fa-xmark"></i>
+              </button>
+            </div>
+
+            <form onSubmit={handleSubmit} className="p-6 overflow-y-auto flex-1 space-y-4 custom-scrollbar text-xs">
+              
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="col-span-1 sm:col-span-2">
+                  <label className="block font-semibold text-slate-700 mb-1">Nombre / Título de la Obra *</label>
+                  <input 
+                    type="text" 
+                    required
+                    value={formData.title} 
+                    onChange={(e) => handleChange('title', e.target.value)}
+                    className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-sky-500 focus:outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">Código de Obra *</label>
+                  <input 
+                    type="text" 
+                    required
+                    value={formData.code} 
+                    onChange={(e) => handleChange('code', e.target.value)}
+                    className="w-full border border-slate-300 rounded-lg px-3 py-2 font-mono focus:ring-2 focus:ring-sky-500 focus:outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">Columna en Kanban *</label>
+                  <select 
+                    value={formData.columnId} 
+                    onChange={(e) => handleChange('columnId', e.target.value)}
+                    className="w-full border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-sky-500 focus:outline-none"
+                  >
+                    {columns.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">Contratista Asignado *</label>
+                  <input 
+                    type="text"
+                    list="contratistas-edit-list"
+                    value={formData.contratista || ''} 
+                    onChange={(e) => handleChange('contratista', e.target.value)}
+                    className="w-full border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-sky-500 focus:outline-none uppercase"
+                  />
+                  <datalist id="contratistas-edit-list">
+                    {availableContratistas.map(c => <option key={c} value={c} />)}
+                  </datalist>
+                </div>
+
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">Estructura Homologada *</label>
+                  <input 
+                    type="text"
+                    list="estructuras-edit-list"
+                    value={formData.estructura || ''} 
+                    onChange={(e) => handleChange('estructura', e.target.value)}
+                    className="w-full border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-sky-500 focus:outline-none"
+                  />
+                  <datalist id="estructuras-edit-list">
+                    {ESTRUCTURAS_DEFAULT.map(e => <option key={e} value={e} />)}
+                  </datalist>
+                </div>
+
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">Fecha Inicio Estimada</label>
+                  <input 
+                    type="text" 
+                    value={formData.fechaInicio || ''} 
+                    onChange={(e) => handleChange('fechaInicio', e.target.value)}
+                    placeholder="Ej: 5/10/26"
+                    className="w-full border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-sky-500 focus:outline-none font-mono"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">Fecha Fin Estimada</label>
+                  <input 
+                    type="text" 
+                    value={formData.fechaFin || ''} 
+                    onChange={(e) => handleChange('fechaFin', e.target.value)}
+                    placeholder="Ej: 30/10/26"
+                    className="w-full border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-sky-500 focus:outline-none font-mono"
+                  />
+                </div>
+
+                <div className="col-span-1 sm:col-span-2">
+                  <label className="block font-semibold text-slate-700 mb-1">Ubicación / Sitio</label>
+                  <input 
+                    type="text" 
+                    value={formData.ubicacion || ''} 
+                    onChange={(e) => handleChange('ubicacion', e.target.value)}
+                    placeholder="Ej: Alderetes, Tucumán"
+                    className="w-full border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-sky-500 focus:outline-none"
+                  />
+                </div>
+
+                <div className="col-span-1 sm:col-span-2">
+                  <label className="block font-semibold text-slate-700 mb-1">Notas y Descripciones Detalladas</label>
+                  <textarea 
+                    rows={3}
+                    value={formData.notas || ''} 
+                    onChange={(e) => handleChange('notas', e.target.value)}
+                    placeholder="Detalles del terreno, observaciones de inspección..."
+                    className="w-full border border-slate-300 rounded-lg p-3 focus:ring-2 focus:ring-sky-500 focus:outline-none"
+                  ></textarea>
+                </div>
+              </div>
+
+              <div className="pt-4 border-t border-slate-200 flex items-center justify-between">
+                <div className="flex space-x-2">
+                  <button 
+                    type="button"
+                    onClick={onDuplicate}
+                    className="bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-300 text-xs font-semibold px-3 py-2 rounded-lg transition flex items-center gap-1"
+                  >
+                    <i className="fa-regular fa-copy"></i> Duplicar
+                  </button>
+                  <button 
+                    type="button"
+                    onClick={onDelete}
+                    className="bg-red-50 hover:bg-red-100 text-red-700 border border-red-300 text-xs font-semibold px-3 py-2 rounded-lg transition flex items-center gap-1"
+                  >
+                    <i className="fa-solid fa-trash"></i> Eliminar
+                  </button>
+                </div>
+
+                <div className="flex space-x-2">
+                  <button 
+                    type="button" 
+                    onClick={onClose}
+                    className="bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold px-4 py-2 rounded-lg transition"
+                  >
+                    Cancelar
+                  </button>
+                  <button 
+                    type="submit"
+                    className="bg-sky-600 hover:bg-sky-700 text-white text-xs font-bold px-5 py-2 rounded-lg shadow-md transition flex items-center gap-1.5"
+                  >
+                    <i className="fa-solid fa-floppy-disk"></i> Guardar Cambios
+                  </button>
+                </div>
+              </div>
+
+            </form>
+
+          </div>
+        </div>
+      );
+    }
+
+    function ProjectCreateModal({ columns, onCreate, onClose, availableContratistas }) {
+      const [formData, setFormData] = useState({
+        code: `TU${Math.floor(10000 + Math.random() * 90000)}`,
+        title: '',
+        columnId: 'pendientes',
+        contratista: availableContratistas[0] || 'RAUL',
+        estructura: ESTRUCTURAS_DEFAULT[0],
+        fechaInicio: '1/11/26',
+        fechaFin: '30/11/26',
+        prioridad: 'Media',
+        ubicacion: '',
+        notas: ''
+      });
+
+      const handleSubmit = (e) => {
+        e.preventDefault();
+        onCreate(formData);
+      };
+
+      return (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-xl overflow-hidden">
+            
+            <div className="bg-slate-900 text-white p-4 px-6 flex items-center justify-between border-b border-slate-800">
+              <h2 className="text-base font-bold flex items-center gap-2">
+                <i className="fa-solid fa-square-plus text-sky-400"></i> Crear Nueva Obra
+              </h2>
+              <button onClick={onClose} className="text-slate-400 hover:text-white text-lg">
+                <i className="fa-solid fa-xmark"></i>
+              </button>
+            </div>
+
+            <form onSubmit={handleSubmit} className="p-6 space-y-4 text-xs">
+              
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">Nombre / Título de Obra *</label>
+                <input 
+                  type="text" 
+                  required
+                  placeholder="Ej: Alderetes M1"
+                  value={formData.title} 
+                  onChange={(e) => setFormData({ ...formData, title: e.target.value })}
+                  className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-sky-500 focus:outline-none"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">Código de Obra *</label>
+                  <input 
+                    type="text" 
+                    required
+                    value={formData.code} 
+                    onChange={(e) => setFormData({ ...formData, code: e.target.value })}
+                    className="w-full border border-slate-300 rounded-lg px-3 py-2 font-mono focus:ring-2 focus:ring-sky-500 focus:outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">Columna Inicial</label>
+                  <select 
+                    id="new-proj-col"
+                    value={formData.columnId} 
+                    onChange={(e) => setFormData({ ...formData, columnId: e.target.value })}
+                    className="w-full border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-sky-500 focus:outline-none"
+                  >
+                    {columns.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">CTTA ASIGNADO *</label>
+                  <input 
+                    type="text"
+                    list="contratistas-create-list"
+                    value={formData.contratista} 
+                    onChange={(e) => setFormData({ ...formData, contratista: e.target.value })}
+                    className="w-full border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-sky-500 focus:outline-none uppercase"
+                  />
+                  <datalist id="contratistas-create-list">
+                    {availableContratistas.map(c => <option key={c} value={c} />)}
+                  </datalist>
+                </div>
+
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">Estructura Homologada *</label>
+                  <input 
+                    type="text"
+                    list="estructuras-create-list"
+                    value={formData.estructura} 
+                    onChange={(e) => setFormData({ ...formData, estructura: e.target.value })}
+                    className="w-full border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-sky-500 focus:outline-none"
+                  />
+                  <datalist id="estructuras-create-list">
+                    {ESTRUCTURAS_DEFAULT.map(e => <option key={e} value={e} />)}
+                  </datalist>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">Fecha Inicio Estimada</label>
+                  <input 
+                    type="text" 
+                    value={formData.fechaInicio} 
+                    onChange={(e) => setFormData({ ...formData, fechaInicio: e.target.value })}
+                    placeholder="Ej: 5/10/26"
+                    className="w-full border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-sky-500 focus:outline-none font-mono"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">Fecha Fin Estimada</label>
+                  <input 
+                    type="text" 
+                    value={formData.fechaFin} 
+                    onChange={(e) => setFormData({ ...formData, fechaFin: e.target.value })}
+                    placeholder="Ej: 30/10/26"
+                    className="w-full border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-sky-500 focus:outline-none font-mono"
+                  />
+                </div>
+              </div>
+
+              <div className="pt-3 border-t border-slate-200 flex items-center justify-end space-x-2">
+                <button 
+                  type="button" 
+                  onClick={onClose}
+                  className="bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold px-4 py-2 rounded-lg transition"
+                >
+                  Cancelar
+                </button>
+                <button 
+                  type="submit"
+                  className="bg-sky-600 hover:bg-sky-700 text-white text-xs font-bold px-5 py-2 rounded-lg shadow-md transition flex items-center gap-1.5"
+                >
+                  <i className="fa-solid fa-plus"></i> Crear Obra
+                </button>
+              </div>
+
+            </form>
+
+          </div>
+        </div>
+      );
+    }
+
+    function DeleteConfirmModal({ onConfirm, onCancel }) {
+      return (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-sm p-6 text-center space-y-4">
+            <div className="w-12 h-12 rounded-full bg-red-100 text-red-600 mx-auto flex items-center justify-center text-xl">
+              <i className="fa-solid fa-triangle-exclamation"></i>
+            </div>
+            <div>
+              <h3 className="font-bold text-slate-900 text-base">¿Eliminar esta obra?</h3>
+              <p className="text-xs text-slate-500 mt-1">Esta acción borrará la obra de manera permanente.</p>
+            </div>
+            <div className="flex items-center justify-center space-x-2 pt-2">
+              <button 
+                onClick={onCancel}
+                className="bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold px-4 py-2 rounded-lg transition"
+              >
+                Cancelar
+              </button>
+              <button 
+                onClick={onConfirm}
+                className="bg-red-600 hover:bg-red-700 text-white text-xs font-bold px-4 py-2 rounded-lg transition shadow-md"
+              >
+                Sí, Eliminar
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    function AnalyticsModal({ projects, onClose }) {
+      const stageStats = useMemo(() => {
+        const stats = {};
+        ETAPAS_LIST.forEach(e => {
+          stats[e.id] = { green: 0, yellow: 0, red: 0, gray: 0, total: projects.length };
+        });
+
+        projects.forEach(p => {
+          ETAPAS_LIST.forEach(e => {
+            const st = p.etapas?.[e.id] || 'gray';
+            if (stats[e.id][st] !== undefined) stats[e.id][st]++;
+          });
+        });
+
+        return stats;
+      }, [projects]);
+
+      return (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-2xl overflow-hidden flex flex-col max-h-[85vh]">
+            
+            <div className="bg-slate-900 text-white p-4 px-6 flex items-center justify-between border-b border-slate-800">
+              <h2 className="text-base font-bold flex items-center gap-2">
+                <i className="fa-solid fa-chart-line text-sky-400"></i> Métricas por Etapa Técnica
+              </h2>
+              <button onClick={onClose} className="text-slate-400 hover:text-white text-lg">
+                <i className="fa-solid fa-xmark"></i>
+              </button>
+            </div>
+
+            <div className="p-6 overflow-y-auto space-y-4 text-xs custom-scrollbar">
+              <div className="space-y-3">
+                {ETAPAS_LIST.map((etapa) => {
+                  const st = stageStats[etapa.id];
+                  const greenPct = Math.round((st.green / (projects.length || 1)) * 100);
+                  const yellowPct = Math.round((st.yellow / (projects.length || 1)) * 100);
+                  const redPct = Math.round((st.red / (projects.length || 1)) * 100);
+
+                  return (
+                    <div key={etapa.id} className="bg-slate-50 border border-slate-200 rounded-lg p-2.5">
+                      <div className="flex items-center justify-between font-semibold mb-1">
+                        <span className="text-slate-800 font-bold">{etapa.label}</span>
+                        <span className="text-slate-500 font-normal">
+                          🟢 {st.green} | 🟡 {st.yellow} | 🔴 {st.red}
+                        </span>
+                      </div>
+
+                      <div className="w-full bg-slate-200 rounded-full h-2.5 overflow-hidden flex">
+                        <div style={{ width: `${greenPct}%` }} className="bg-emerald-500 h-full" title={`Verde: ${greenPct}%`}></div>
+                        <div style={{ width: `${yellowPct}%` }} className="bg-amber-400 h-full" title={`Amarillo: ${yellowPct}%`}></div>
+                        <div style={{ width: `${redPct}%` }} className="bg-red-500 h-full" title={`Rojo: ${redPct}%`}></div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="p-4 bg-slate-50 border-t border-slate-200 text-right">
+              <button 
+                onClick={onClose}
+                className="bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs px-5 py-2 rounded-lg transition"
+              >
+                Cerrar
+              </button>
+            </div>
+
+          </div>
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>
